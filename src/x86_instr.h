@@ -127,7 +127,7 @@ struct instr {
     struct arg args[3];
     byte addrsize;
     enum disptype modrm_disp;
-    char modrm_reg; /* This is a little ugly, but 16 is IP and -1 is none (aka IZ). */
+    int8_t modrm_reg; /* This is a little ugly, but 16 is IP and -1 is none (aka IZ). */
     byte sib_scale;
     char sib_index;
     int usedmem:1;  /* used for error checking */
@@ -138,7 +138,7 @@ struct instr {
 };
 
 extern int get_instr(dword ip, const byte *p, struct instr *instr, int bits);
-extern void print_instr(char *ip, byte *p, int len, byte flags, struct instr *instr, const char *comment, int bits);
+extern void print_instr(char *ip, const byte *p, int len, byte flags, struct instr *instr, const char *comment, int bits);
 
 /* 66 + 67 + seg + lock/rep + 2 bytes opcode + modrm + sib + 4 bytes displacement + 4 bytes immediate */
 #define MAX_INSTR       16
