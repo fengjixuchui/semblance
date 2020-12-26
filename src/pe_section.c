@@ -122,7 +122,7 @@ static char *relocate_arg(const struct instr *instr, const struct arg *arg, cons
     return NULL;
 }
 
-static const char *get_arg_comment(const struct section *sec,
+static const char *get_arg_comment(const struct section *sec, dword end_ip,
         const struct instr *instr, const struct arg *arg, const struct pe *pe)
 {
     static char comment_str[10];
@@ -134,6 +134,28 @@ static const char *get_arg_comment(const struct section *sec,
     /* Don't ever care about these. */
     if (arg->type == REL8 || arg->type == REL16)
         return NULL;
+
+    if (instr->modrm_reg == 16)
+    {
+        dword tip;
+        qword abstip;
+
+        if (arg->type >= RM && arg->type <= MEM)
+            tip = end_ip + arg->value;
+        else
+            tip = end_ip + arg->value;
+        abstip = tip;
+        if (!pe_rel_addr) abstip += pe->imagebase;
+
+        if ((comment = get_imported_name(tip + pe->imagebase, pe)))
+            return comment;
+
+        if ((comment = get_export_name(tip, pe)))
+            return comment;
+
+        snprintf(comment_str, 10, "%lx", abstip);
+        return comment_str;
+    }
 
     /* Relocate anything that points inside the image's address space or that
      * has a relocation entry. */
@@ -189,31 +211,8 @@ static int print_pe_instr(const struct section *sec, dword ip, byte *p, const st
      * relocated, and relocations proper are scattered throughout code sections
      * and relocated according to the contents of .reloc. */
 
-    if (!(comment = get_arg_comment(sec, &instr, &instr.args[0], pe)))
-        comment = get_arg_comment(sec, &instr, &instr.args[1], pe);
-
-    /* 64-bit does it with IP-relative addressing. */
-    if (!comment && instr.modrm_reg == 16) {
-        dword tip;
-        qword abstip;
-
-        if (instr.args[0].type >= RM && instr.args[0].type <= MEM)
-            tip = ip + len + instr.args[0].value;
-        else
-            tip = ip + len + instr.args[1].value;
-        abstip = tip;
-        if (!pe_rel_addr) abstip += pe->imagebase;
-
-        comment = get_imported_name(tip + pe->imagebase, pe);
-
-        if (!comment)
-            comment = get_export_name(tip, pe);
-
-        if (!comment) {
-            snprintf(comment_str, 10, "%lx", abstip);
-            comment = comment_str;
-        }
-    }
+    if (!(comment = get_arg_comment(sec, ip + len, &instr, &instr.args[0], pe)))
+        comment = get_arg_comment(sec, ip + len, &instr, &instr.args[1], pe);
 
     print_instr(ip_string, p, len, sec->instr_flags[ip - sec->address], &instr, comment, bits);
 
