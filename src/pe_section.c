@@ -73,8 +73,6 @@ static const char *get_imported_name(dword offset, const struct pe *pe) {
     static char comment[256];
     unsigned i;
 
-    offset -= pe->imagebase;
-
     for (i = 0; i < pe->import_count; ++i)
     {
         struct import_module *module = &pe->imports[i];
@@ -126,28 +124,23 @@ static const char *get_arg_comment(const struct section *sec, dword end_ip,
         const struct instr *instr, const struct arg *arg, const struct pe *pe)
 {
     static char comment_str[10];
+    struct section *tsec;
     const char *comment;
+    qword rel_value;
 
     if (arg->type == NONE)
         return NULL;
 
-    /* Don't ever care about these. */
-    if (arg->type == REL8 || arg->type == REL16)
-        return NULL;
-
-    if (instr->modrm_reg == 16)
+    if (instr->modrm_reg == 16 && arg->type >= RM && arg->type <= MEM)
     {
         dword tip;
         qword abstip;
 
-        if (arg->type >= RM && arg->type <= MEM)
-            tip = end_ip + arg->value;
-        else
-            tip = end_ip + arg->value;
+        tip = end_ip + arg->value;
         abstip = tip;
         if (!pe_rel_addr) abstip += pe->imagebase;
 
-        if ((comment = get_imported_name(tip + pe->imagebase, pe)))
+        if ((comment = get_imported_name(tip, pe)))
             return comment;
 
         if ((comment = get_export_name(tip, pe)))
@@ -157,26 +150,39 @@ static const char *get_arg_comment(const struct section *sec, dword end_ip,
         return comment_str;
     }
 
+    /* FIXME: This is getting messy. */
+    rel_value = arg->value;
+    if (!pe_rel_addr) rel_value -= pe->imagebase;
+
     /* Relocate anything that points inside the image's address space or that
      * has a relocation entry. */
-    if (addr2section(arg->value - pe->imagebase, pe) || (sec->instr_flags[arg->ip - sec->address] & INSTR_RELOC))
+    if ((tsec = addr2section(rel_value, pe)) || (sec->instr_flags[arg->ip - sec->address] & INSTR_RELOC))
     {
-        if ((comment = get_imported_name(arg->value, pe)))
+        if ((comment = get_imported_name(rel_value, pe)))
             return comment;
-        if ((comment = get_export_name(arg->value, pe)))
+        if ((comment = get_export_name(rel_value, pe)))
             return comment;
 
         /* Sometimes we have TWO levels of indirection—call to jmp to
          * relocated address. mingw-w64 does this. */
 
-        if (read_word(addr2offset(arg->value, pe)) == 0x25ff) /* absolute jmp */
-            return get_imported_name(read_dword(addr2offset(arg->value, pe) + 2), pe);
+        if (tsec && rel_value < tsec->address + tsec->length
+                && read_word(addr2offset(rel_value, pe)) == 0x25ff) /* absolute jmp */
+        {
+            rel_value = read_dword(addr2offset(rel_value, pe) + 2);
+            if (!pe_rel_addr) rel_value -= pe->imagebase;
+            return get_imported_name(rel_value, pe);
+        }
 
         if ((comment = relocate_arg(instr, arg, pe)))
             return comment;
 
+        /* Don't print any comment for mundane relative jumps or calls. */
+        if (arg->type == REL8 || arg->type == REL16)
+            return NULL;
+
         /* If all else fails, print the address relative to the image base. */
-        snprintf(comment_str, 10, "%lx", pe_rel_addr ? arg->value - pe->imagebase : arg->value);
+        snprintf(comment_str, 10, "%lx", rel_value);
         return comment_str;
     }
 
@@ -190,7 +196,6 @@ static int print_pe_instr(const struct section *sec, dword ip, byte *p, const st
     char ip_string[17];
     qword absip = ip;
     int bits = (pe->magic == 0x10b) ? 32 : 64;
-    char comment_str[10];
 
     if (!pe_rel_addr)
         absip += pe->imagebase;
@@ -344,15 +349,21 @@ static void scan_segment(dword ip, struct pe *pe) {
 
             if (tsec)
             {
-                dword trelip = instr.args[0].value - tsec->address;
+                if (tsec->flags & 0x20)
+                {
+                    dword trelip = instr.args[0].value - tsec->address;
 
-                if (!strcmp(instr.op.name, "call"))
-                    tsec->instr_flags[trelip] |= INSTR_FUNC;
+                    if (!strcmp(instr.op.name, "call"))
+                        tsec->instr_flags[trelip] |= INSTR_FUNC;
+                    else
+                        tsec->instr_flags[trelip] |= INSTR_JUMP;
+
+                    /* scan it */
+                    scan_segment(instr.args[0].value, pe);
+                }
                 else
-                    tsec->instr_flags[trelip] |= INSTR_JUMP;
-    
-                /* scan it */
-                scan_segment(instr.args[0].value, pe);
+                    warn_at("Branch '%s' to byte %lx in non-code section %s.\n",
+                            instr.op.name, instr.args[0].value, tsec->name);
             } else
                 warn_at("Branch '%s' to byte %lx not in image.\n", instr.op.name, instr.args[0].value);
         }

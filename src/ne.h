@@ -76,7 +76,7 @@ struct reloc {
 
 struct segment {
     word cs;
-    long start;
+    off_t start;
     word length;
     word flags;
     word min_alloc;
@@ -102,9 +102,6 @@ struct ne {
 
     struct segment *segments;
 };
-
-extern void readne(long offset_ne, struct ne *ne);
-extern void freene(struct ne *ne);
 
 /* in ne_resource.c */
 extern void print_rsrc(off_t start);

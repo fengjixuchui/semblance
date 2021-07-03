@@ -344,7 +344,7 @@ static void get_reloc_table(struct pe *pe) {
     }
 }
 
-void readpe(off_t offset_pe, struct pe *pe)
+static void readpe(off_t offset_pe, struct pe *pe)
 {
     off_t offset;
     int i, cdirs;
@@ -402,7 +402,7 @@ void readpe(off_t offset_pe, struct pe *pe)
         read_sections(pe);
 }
 
-void freepe(struct pe *pe) {
+static void freepe(struct pe *pe) {
     int i;
 
     for (i = 0; i < pe->header->NumberOfSections; i++)
@@ -415,7 +415,7 @@ void freepe(struct pe *pe) {
     free(pe->imports);
 }
 
-void dumppe(long offset_pe) {
+void dumppe(off_t offset_pe) {
     struct pe pe = {0};
     int i, j;
 
